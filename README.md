@@ -78,7 +78,7 @@ A Multi-Method Panel Analysis. Working Paper.
 
 ```
 
-## Full [results](https://raw.githack.com/lusiki/ESG-turism/main/present%20results.html)
+## Comprehensive empirical report is avaliable [here](https://raw.githack.com/lusiki/ESG-turism/main/present%20results.html)
 
 
 

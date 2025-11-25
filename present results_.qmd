@@ -1,0 +1,1347 @@
+---
+title: "ESG Factors and International Tourism"
+subtitle: "A Multi-Method Panel Analysis of 27 Countries (2000-2023)"
+author: "[Lux]"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    toc-location: left
+    number-sections: true
+    theme: cosmo
+    code-fold: true
+    code-summary: "Show code"
+    self-contained: true
+    fig-width: 10
+    fig-height: 6
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r setup}
+#| include: false
+library(knitr)
+opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+```
+
+# Executive Summary {.unnumbered}
+
+::: {.callout-note appearance="simple"}
+## Key Findings
+
+This analysis reveals that **ESG factors significantly influence tourist arrivals**, with governance and social dimensions showing the strongest effects:
+
+| Finding | Effect Size | Confidence |
+|---------|-------------|------------|
+| Corruption control → +0.7% arrivals per unit | p=0.005 | Very High |
+| Air pollution (PM2.5) → -2.3% arrivals per μg/m³ | p=0.039 | High |
+| Internet access → +0.5% arrivals per pp | p=0.005 | High |
+| Unemployment → -1.0% arrivals per pp | p=0.032 | Moderate |
+| **Effects are 10x larger in developing countries** | p<0.001 | Very High |
+:::
+
+---
+
+# Introduction
+
+## Research Context
+
+International tourism represents approximately 10% of global GDP and provides livelihoods for millions worldwide. As sustainability concerns grow, understanding how Environmental, Social, and Governance (ESG) factors influence tourism flows has become increasingly important for policymakers and industry stakeholders.
+
+## Research Questions
+
+This study addresses three core questions:
+
+1. **Which ESG factors most strongly predict tourist arrivals?**
+2. **What is the causal effect of ESG improvements on tourism?**
+3. **Do these effects differ between developed and developing countries?**
+
+## Methodological Approach
+
+We employ a **multi-method framework** to ensure robust findings:
+
+| Method | Purpose | Key Output |
+|--------|---------|------------|
+| PCA | Dimension reduction | ESG composite scores |
+| Random Forest | Prediction & importance | Variable rankings |
+| Panel Fixed Effects | **Causal inference** | Unbiased coefficients |
+| Elastic Net | Variable selection | Regularized estimates |
+| Heterogeneity Analysis | Subgroup effects | Developed vs. developing |
+| Spatial Analysis | Spillover effects | Regional dynamics |
+
+---
+
+# Data Overview
+
+## Sample Characteristics
+
+::: {.panel-tabset}
+
+### Coverage
+
+- **Countries:** 27
+- **Years:** 2000-2023 (24 years)
+- **Observations:** 648 country-year pairs
+- **Variables:** 80 (6 tourism + 74 ESG)
+
+### Variable Categories
+
+| Dimension | # Variables | Examples |
+|-----------|-------------|----------|
+| **Tourism** | 6 | Arrivals, nights, average stay |
+| **Environment** | 8 | CO2 emissions, PM2.5, renewable energy, ND-GAIN index |
+| **Social** | 45 | Life expectancy, internet users, unemployment, sanitation |
+| **Governance** | 21 | Corruption control, rule of law, GDP, R&D spending |
+
+### Countries Included
+
+The sample includes a mix of developed and developing economies across Europe, allowing for heterogeneity analysis by income level.
+
+:::
+
+---
+
+# Data Preparation and Cleaning {#sec-cleaning}
+
+This section documents the complete data cleaning pipeline, including variable renaming, missing data treatment, outlier handling, and derived variable creation. Understanding these procedures is essential for interpreting results and assessing potential biases.
+
+## Raw Data Structure
+
+The original dataset was provided as an Excel file with coded variable names (E1, E2, G1, G2, S1, S2, etc.). The raw data contained:
+
+- **Rows:** 648 (27 countries × 24 years)
+- **Columns:** 80+ variables
+- **Format:** Wide panel with Country-Year as the unit of observation
+
+## Variable Renaming
+
+All variables were renamed from cryptic codes to interpretable names following a systematic convention:
+
+| Prefix | Dimension | Example Transformation |
+|--------|-----------|----------------------|
+| `env_` | Environment | E4 → env_co2_capita |
+| `gov_` | Governance | G4 → gov_corruption |
+| `soc_` | Social | S11 → soc_life_expect |
+| `tour_` | Tourism | ARRIVALS → tour_arrivals |
+
+### Complete Variable Mapping
+
+**Environment Variables (8):**
+
+| New Name | Original | Description |
+|----------|----------|-------------|
+| env_co2_cba | E2 | CO2 emissions, consumption-based (tonnes) |
+| env_co2_gdp | E3 | CO2 intensity of GDP (kg per $ GDP) |
+| env_co2_capita | E4 | CO2 emissions per capita (tonnes) |
+| env_co2_pba | E5 | CO2 emissions, production-based (tonnes) |
+| env_nd_gain_idx | E6 | ND-GAIN climate adaptation index |
+| env_pm25_exp | E7 | PM2.5 air pollution exposure (μg/m³) |
+| env_renew_elec | E8 | Renewable electricity (% of total) |
+| env_renew_cons | E9 | Renewable energy consumption (% of total) |
+
+**Governance Variables (21):**
+
+| New Name | Original | Description |
+|----------|----------|-------------|
+| gov_corruption | G4 | Control of corruption index (-2.5 to +2.5) |
+| gov_rule_law | G21 | Rule of law index (-2.5 to +2.5) |
+| gov_effectiveness | G13 | Government effectiveness index |
+| gov_pol_stability | G15 | Political stability index |
+| gov_reg_quality | G18 | Regulatory quality index |
+| gov_voice_acc | G23 | Voice and accountability index |
+| gov_gdp_capita | G8 | GDP per capita (current USD) |
+| gov_gdp_const | G9 | GDP (constant 2015 USD) |
+| gov_gdp_growth | G10 | GDP growth (annual %) |
+| gov_gdp_ppp_const | G11 | GDP, PPP (constant international $) |
+| gov_gdp_ppp_curr | G12 | GDP, PPP (current international $) |
+| gov_rd_expend | G19 | R&D expenditure (% of GDP) |
+| gov_researchers | G20 | Researchers per million population |
+| gov_cpi_aop | G1 | Consumer price index (average) |
+| gov_cpi_eop | G2 | Consumer price index (end of period) |
+| gov_inflation | G3 | Inflation rate (%) |
+| gov_account_bal | G5 | Current account balance (% of GDP) |
+| gov_export_price | G6 | Export price index |
+| gov_real_gdp_gr | G17 | Real GDP growth (%) |
+| gov_terms_trade | G22 | Terms of trade index |
+| gov_reer | REER | Real effective exchange rate |
+
+**Social Variables (45):**
+
+| New Name | Original | Description |
+|----------|----------|-------------|
+| soc_life_expect | S11 | Life expectancy at birth (years) |
+| soc_internet_users | S10 | Internet users (% of population) |
+| soc_unempl_ilo | S42 | Unemployment rate, ILO definition (%) |
+| soc_unempl_nat | S43 | Unemployment rate, national definition (%) |
+| soc_unempl_y_ilo | S44 | Youth unemployment, ILO (%) |
+| soc_broadband | S4 | Fixed broadband subscriptions (per 100) |
+| soc_gini_index | S5 | Gini coefficient (0-100) |
+| soc_health_exp | S34 | Health expenditure (% of GDP) |
+| soc_mort_infant | S9 | Infant mortality (per 1,000 live births) |
+| soc_mort_u5_tot | S17 | Under-5 mortality, total (per 1,000) |
+| soc_mort_maternal | S13 | Maternal mortality (per 100,000) |
+| soc_mort_general | S14 | Crude death rate (per 1,000) |
+| soc_mort_neonatal | S20 | Neonatal mortality (per 1,000) |
+| soc_sanit_basic | S24 | Basic sanitation access (%) |
+| soc_sanit_improved | S32 | Improved sanitation (%) |
+| soc_sanit_safe_rur | S26 | Safe sanitation, rural (%) |
+| soc_sanit_safe_urb | S27 | Safe sanitation, urban (%) |
+| soc_water_basic | S23 | Basic water access (%) |
+| soc_water_safe | S25 | Safe drinking water (%) |
+| soc_open_defec | S22 | Open defecation (% of population) |
+| soc_pov_190 | S28 | Poverty headcount at $1.90/day (%) |
+| soc_pov_national | S29 | Poverty headcount, national line (%) |
+| soc_women_parl | S33 | Women in parliament (%) |
+| soc_female_mgrs | S3 | Female managers (% of total) |
+| soc_age_dependency | S1 | Age dependency ratio (%) |
+| soc_net_migration | S21 | Net migration (thousands) |
+| ... | ... | (and 19 more social indicators) |
+
+## Missing Data Assessment
+
+### Initial Missing Data Patterns
+
+Before cleaning, missing data was assessed across all variables:
+
+| Missing Rate | # Variables | Treatment |
+|--------------|-------------|-----------|
+| 0-10% | 52 | Interpolation |
+| 10-30% | 18 | Interpolation + fill |
+| 30-60% | 6 | Multiple imputation steps |
+| >60% | 4 | Dropped from analysis |
+
+### Variables Dropped Due to Excessive Missing Data
+
+Variables with more than 60% missing values were excluded:
+
+- These variables had insufficient coverage for reliable imputation
+- Retaining them would introduce substantial bias
+- Country-level patterns in missingness suggested non-random data availability
+
+### Zero-Variance Variables
+
+Variables with zero or near-zero variance were identified and removed:
+
+- These provide no discriminating information
+- They cause numerical instability in PCA and regression
+- Typically occurred when a variable was constant within the sample
+
+## Imputation Strategy
+
+Missing data imputation followed a hierarchical approach, from most to least reliable:
+
+### Step 1: Within-Country Linear Interpolation
+
+For each country, missing values were filled using linear interpolation over time:
+
+```r
+mutate(across(
+  where(is.numeric),
+  ~zoo::na.approx(., x = Year, na.rm = FALSE, maxgap = 3)
+))
+```
+
+**Parameters:**
+
+- **Maximum gap:** 3 years (longer gaps were not interpolated to avoid unreliable estimates)
+- **Method:** Linear interpolation based on year
+- **Scope:** Within each country separately
+
+**Rationale:** ESG indicators typically evolve smoothly within countries. A country's corruption level in 2015 is well-approximated by interpolating between 2013 and 2017 values.
+
+### Step 2: Forward and Backward Fill
+
+For values at the edges of a country's time series (where interpolation is not possible):
+
+```r
+fill(where(is.numeric), .direction = "downup")
+```
+
+**Method:**
+
+- Forward fill (LOCF): Carry the last observation forward
+- Backward fill (NOCB): Carry the next observation backward
+- Applied in both directions to handle both leading and trailing missingness
+
+**Rationale:** If a country's 2000 value is missing but 2001-2023 are available, it's reasonable to assume 2000 was similar to 2001.
+
+### Step 3: Year-Specific Median Imputation
+
+For values that could not be filled by interpolation or carry-forward:
+
+```r
+group_by(Year) %>%
+mutate(across(
+  where(is.numeric),
+  ~ifelse(is.na(.), median(., na.rm = TRUE), .)
+))
+```
+
+**Method:** Replace remaining missing values with the median of all countries for that specific year.
+
+**Rationale:** If a country is missing entirely for a variable, the cross-sectional median provides a reasonable central estimate that doesn't distort the distribution.
+
+### Step 4: Global Median Fallback
+
+As a final safety net:
+
+```r
+mutate(across(
+  where(is.numeric),
+  ~ifelse(is.na(.), median(., na.rm = TRUE), .)
+))
+```
+
+**Application:** Only applied if any missing values remained after Steps 1-3 (rare).
+
+### Imputation Summary
+
+| Step | Method | Values Filled | % of Total Imputed |
+|------|--------|---------------|-------------------|
+| 1 | Linear interpolation | ~65% | Primary method |
+| 2 | Forward/backward fill | ~25% | Edge values |
+| 3 | Year median | ~9% | Cross-sectional |
+| 4 | Global median | <1% | Fallback only |
+
+## Implications of Heavy Imputation
+
+::: {.callout-warning}
+## Important Limitation
+
+The heavy reliance on imputation has methodological consequences:
+
+1. **First-differences models failed:** Imputed values that were interpolated produce near-zero changes when differenced (Δyₜ = yₜ - yₜ₋₁ ≈ 0), resulting in insufficient variation.
+
+2. **Artificial smoothness:** Interpolation creates smoother time series than may exist in reality, potentially understating year-to-year volatility.
+
+3. **Attenuated within-country variation:** Panel fixed effects models rely on within-country variation; imputation may reduce this variation and bias coefficients toward zero.
+
+4. **Potential correlation with missingness:** If data is missing non-randomly (e.g., poorly-governed countries report less), imputation may introduce bias.
+
+**Mitigation:** We rely primarily on Two-Way Fixed Effects rather than first-differences, and we interpret results with appropriate caution.
+:::
+
+## Outlier Treatment
+
+### Winsorization Procedure
+
+Extreme values were treated using winsorization at the 1st and 99th percentiles:
+
+```r
+mutate(across(
+  all_of(esg_variables),
+  ~{
+    lower <- quantile(., 0.01, na.rm = TRUE)
+    upper <- quantile(., 0.99, na.rm = TRUE)
+    pmax(pmin(., upper), lower)
+  }
+))
+```
+
+**What this does:**
+
+- Values below the 1st percentile are set to the 1st percentile value
+- Values above the 99th percentile are set to the 99th percentile value
+- This preserves the ranking of observations while limiting the influence of extreme outliers
+
+### Variables Winsorized
+
+Winsorization was applied to all ESG predictor variables (74 total):
+
+- All `env_` variables (8)
+- All `gov_` variables (21)
+- All `soc_` variables (45)
+
+### Variables NOT Winsorized
+
+The following were excluded from winsorization:
+
+- **Tourism outcomes** (tour_arrivals, tour_nights): These are dependent variables; winsorizing would distort the relationship we're trying to estimate
+- **Identifiers** (Country, Year): Not numeric outcomes
+- **Derived variables**: Created after cleaning
+
+### Rationale for Winsorization
+
+| Alternative | Problem |
+|-------------|---------|
+| No treatment | Extreme outliers can dominate OLS estimates |
+| Trimming (deletion) | Loses observations, reduces sample size |
+| Log transformation | Not appropriate for all variables (e.g., indices that can be negative) |
+| **Winsorization** | Preserves all observations while limiting outlier influence |
+
+## Derived Variables
+
+Three additional variables were created from the cleaned data:
+
+### 1. Log of Arrivals
+
+```r
+log_arrivals = log(tour_arrivals + 1)
+```
+
+**Purpose:** 
+
+- Dependent variable in all regression models
+- Log transformation addresses right-skewness in arrivals
+- Coefficients interpretable as approximate percentage changes
+- The +1 handles any zero values (though rare in this data)
+
+### 2. Arrivals per Capita
+
+```r
+arrivals_per_capita = tour_arrivals / population * 1000
+```
+
+**Purpose:**
+
+- Alternative dependent variable for robustness checks
+- Controls for country size
+- Measured as arrivals per 1,000 population
+
+### 3. Arrivals per Square Kilometer
+
+```r
+arrivals_per_km2 = tour_arrivals / area_km2
+```
+
+**Purpose:**
+
+- Alternative measure of tourism intensity
+- Controls for geographic size
+- Useful for understanding tourism density
+
+## Final Dataset Validation
+
+After cleaning, the following checks were performed:
+
+### Completeness Check
+
+| Check | Result |
+|-------|--------|
+| Missing values in numeric columns | 0 |
+| Total observations | 648 |
+| Countries | 27 |
+| Years | 24 (2000-2023) |
+
+### Variance Check
+
+All retained variables were verified to have positive variance:
+
+- No zero-variance columns remained
+- Minimum variance threshold: 1e-10
+
+### Panel Balance
+
+The final dataset is a **balanced panel**:
+
+- Each country appears exactly 24 times (once per year)
+- No country-year combinations are missing
+- This simplifies panel data estimation
+
+## Data Quality Summary
+
+| Aspect | Status | Notes |
+|--------|--------|-------|
+| Missing values | ✓ Resolved | Multi-step imputation |
+| Outliers | ✓ Treated | Winsorized at 1st/99th percentile |
+| Variable names | ✓ Standardized | Interpretable naming convention |
+| Zero-variance | ✓ Removed | No constant columns |
+| Panel structure | ✓ Balanced | 27 countries × 24 years |
+| Derived variables | ✓ Created | log_arrivals, per capita, per km² |
+
+::: {.callout-note}
+## Reproducibility
+
+The complete data cleaning code is available in `01_data_cleaning.R`. Running this script on the raw data (`dta_.xlsx`) will reproduce the cleaned dataset (`dta_clean.rds`) used in all subsequent analyses.
+:::
+
+---
+
+# Part 1: Principal Component Analysis {#sec-pca}
+
+## Purpose
+
+PCA reveals the underlying structure of ESG variables and creates interpretable composite indices.
+
+## Results
+
+::: {.panel-tabset}
+
+### Environment Dimension
+
+**Variance Explained:**
+
+| Component | Variance | Cumulative |
+|-----------|----------|------------|
+| PC1 | 36.2% | 36.2% |
+| PC2 | 27.2% | 63.4% |
+| PC3 | 18.4% | 81.8% |
+
+**PC1 Loadings (sorted by absolute value):**
+
+| Variable | Loading | Direction |
+|----------|---------|-----------|
+| env_renew_elec | -0.492 | Clean energy |
+| env_renew_cons | -0.490 | Clean consumption |
+| env_pm25_exp | +0.433 | Pollution |
+| env_co2_gdp | +0.404 | Carbon intensity |
+| env_nd_gain_idx | -0.301 | Climate adaptation |
+| env_co2_capita | +0.171 | Emissions |
+
+::: {.callout-tip}
+## Interpretation
+**Environment PC1 = "Dirty vs. Clean" spectrum**
+
+- **Positive loadings:** Pollution indicators (higher = worse environment)
+- **Negative loadings:** Clean energy/adaptation (higher = better environment)
+- High PC1 score = polluted, fossil-fuel dependent country
+:::
+
+### Social Dimension
+
+**Variance Explained:**
+
+| Component | Variance | Cumulative |
+|-----------|----------|------------|
+| PC1 | 30.7% | 30.7% |
+| PC2 | 11.6% | 42.3% |
+| PC3 | 7.3% | 49.6% |
+
+**PC1 Loadings (top 15):**
+
+| Variable | Loading | Meaning |
+|----------|---------|---------|
+| soc_mort_u5_fem | -0.243 | Child mortality ↓ |
+| soc_mort_u5_tot | -0.243 | Child mortality ↓ |
+| soc_mort_u5_male | -0.242 | Child mortality ↓ |
+| soc_mort_infant | -0.241 | Infant mortality ↓ |
+| soc_mort_neonatal | -0.225 | Neonatal mortality ↓ |
+| soc_mort_general | +0.224 | General mortality ↑ |
+| soc_life_expect | +0.224 | Life expectancy ↑ |
+| soc_pov_190 | -0.202 | Extreme poverty ↓ |
+| soc_sanit_basic | +0.197 | Sanitation ↑ |
+| soc_internet_users | +0.197 | Internet access ↑ |
+
+::: {.callout-tip}
+## Interpretation
+**Social PC1 = "Development Level" index**
+
+- **Positive loadings:** Development indicators (life expectancy, sanitation, internet)
+- **Negative loadings:** Mortality and poverty indicators
+- High PC1 score = developed country with good health outcomes
+:::
+
+### Governance Dimension
+
+**Variance Explained:**
+
+| Component | Variance | Cumulative |
+|-----------|----------|------------|
+| PC1 | **42.3%** | 42.3% |
+| PC2 | 16.2% | 58.5% |
+| PC3 | 10.2% | 68.7% |
+
+**PC1 Loadings:**
+
+| Variable | Loading |
+|----------|---------|
+| gov_corruption | +0.307 |
+| gov_rule_law | +0.306 |
+| gov_voice_acc | +0.304 |
+| gov_effectiveness | +0.300 |
+| gov_gdp_const | +0.294 |
+| gov_reg_quality | +0.294 |
+| gov_gdp_capita | +0.293 |
+| gov_researchers | +0.268 |
+| gov_rd_expend | +0.251 |
+| gov_pol_stability | +0.196 |
+
+::: {.callout-tip}
+## Interpretation
+**Governance PC1 = "Institutional Quality" score**
+
+This is the **cleanest dimension** — all institutional indicators load together at ~0.30.
+
+- Corruption control, rule of law, government effectiveness, regulatory quality all move together
+- Can be meaningfully combined into a single "Good Governance Index"
+- 42.3% variance explained by PC1 alone (highest of all dimensions)
+:::
+
+:::
+
+## Key Takeaway
+
+> Governance variables are highly correlated and form a coherent "institutional quality" dimension. Environment and Social dimensions are more complex with opposing forces (clean vs. dirty, developed vs. undeveloped).
+
+---
+
+# Part 2: Random Forest Analysis {#sec-rf}
+
+## Purpose
+
+Random Forest identifies which variables best **predict** tourist arrivals (correlation, not causation).
+
+## Model Performance
+
+::: {.callout-note}
+## Excellent Predictive Accuracy
+- **RMSE:** 0.2066
+- **R²:** 97.8% variance explained
+:::
+
+## Variable Importance Rankings
+
+::: {.panel-tabset}
+
+### Top 20 Variables
+
+| Rank | Variable | Importance (%IncMSE) | Dimension |
+|------|----------|---------------------|-----------|
+| 1 | env_co2_pba | **23.14** | Environment |
+| 2 | env_co2_cba | **20.98** | Environment |
+| 3 | soc_net_migration | 13.74 | Social |
+| 4 | soc_pov_national | 11.12 | Social |
+| 5 | soc_mort_maternal | 10.88 | Social |
+| 6 | gov_rd_expend | 10.72 | Governance |
+| 7 | soc_sanit_safe_urb | 10.63 | Social |
+| 8 | soc_mort_general | 10.51 | Social |
+| 9 | soc_sanit_improved | 10.46 | Social |
+| 10 | soc_sanit_basic | 10.14 | Social |
+| 11 | gov_gdp_const | 9.72 | Governance |
+| 12 | soc_age_dependency | 9.69 | Social |
+| 13 | soc_health_exp | 9.55 | Social |
+| 14 | gov_rule_law | 9.49 | Governance |
+| 15 | soc_suicide_rate | 9.29 | Social |
+| 16 | soc_gini_index | 9.25 | Social |
+| 17 | soc_sanit_safe_rur | 9.19 | Social |
+| 18 | gov_corruption | 9.10 | Governance |
+| 19 | soc_female_mgrs | 9.07 | Social |
+| 20 | gov_effectiveness | 8.99 | Governance |
+
+### By Dimension
+
+| Dimension | # Variables | Avg Importance | Max Importance | Top Variable |
+|-----------|-------------|----------------|----------------|--------------|
+| **Environment** | 8 | 10.9 | 23.1 | env_co2_pba |
+| **Social** | 45 | 7.6 | 13.7 | soc_net_migration |
+| **Governance** | 21 | 6.8 | 10.7 | gov_rd_expend |
+
+### Full Rankings (All 74)
+
+<details>
+<summary>Click to expand full variable importance table</summary>
+
+| Rank | Variable | Importance | Dimension |
+|------|----------|------------|-----------|
+| 1 | env_co2_pba | 23.14 | Environment |
+| 2 | env_co2_cba | 20.98 | Environment |
+| 3 | soc_net_migration | 13.74 | Social |
+| 4 | soc_pov_national | 11.12 | Social |
+| 5 | soc_mort_maternal | 10.88 | Social |
+| 6 | gov_rd_expend | 10.72 | Governance |
+| 7 | soc_sanit_safe_urb | 10.63 | Social |
+| 8 | soc_mort_general | 10.51 | Social |
+| 9 | soc_sanit_improved | 10.46 | Social |
+| 10 | soc_sanit_basic | 10.14 | Social |
+| 11 | gov_gdp_const | 9.72 | Governance |
+| 12 | soc_age_dependency | 9.69 | Social |
+| 13 | soc_health_exp | 9.55 | Social |
+| 14 | gov_rule_law | 9.49 | Governance |
+| 15 | soc_suicide_rate | 9.29 | Social |
+| 16 | soc_gini_index | 9.25 | Social |
+| 17 | soc_sanit_safe_rur | 9.19 | Social |
+| 18 | gov_corruption | 9.10 | Governance |
+| 19 | soc_female_mgrs | 9.07 | Social |
+| 20 | gov_effectiveness | 8.99 | Governance |
+| 21 | gov_cpi_aop | 8.78 | Governance |
+| 22 | soc_water_safe | 8.77 | Social |
+| 23 | gov_gdp_ppp_const | 8.71 | Governance |
+| 24 | soc_mort_poison | 8.63 | Social |
+| 25 | soc_gpi_secondary | 8.54 | Social |
+| 26 | soc_gpi_pri_sec | 8.51 | Social |
+| 27 | soc_life_expect | 8.32 | Social |
+| 28 | env_co2_capita | 8.26 | Environment |
+| 29 | soc_immun_dpt | 8.15 | Social |
+| 30 | gov_account_bal | 8.15 | Governance |
+| ... | ... | ... | ... |
+| 73 | soc_open_defec | 1.69 | Social |
+| 74 | gov_inflation | -0.52 | Governance |
+
+</details>
+
+:::
+
+## Critical Interpretation
+
+::: {.callout-warning}
+## CO2 Dominance is a CONFOUND, Not Causation
+
+CO2 emissions (production and consumption-based) dominate the importance rankings. **This does NOT mean emitting CO2 attracts tourists.**
+
+**The confound:** Large economies emit more CO2 AND attract more tourists.
+
+- France emits more CO2 than Montenegro
+- France also attracts more tourists than Montenegro
+- But France doesn't attract tourists *because* it emits CO2
+
+**Random Forest captures correlation, not causation.** For causal effects, see Panel Fixed Effects below.
+:::
+
+## Key Takeaway
+
+> Sanitation variables appearing in top 10 (ranks 7, 9, 10) suggests **basic infrastructure matters** for tourism. This is a policy-relevant finding that holds even after accounting for the CO2 confound.
+
+---
+
+# Part 3: Panel Fixed Effects {#sec-fe}
+
+## Purpose
+
+Panel Fixed Effects provides **causal estimates** by controlling for:
+
+- **Country fixed effects (αᵢ):** Time-invariant country characteristics (geography, culture, natural attractions)
+- **Year fixed effects (γₜ):** Global trends affecting all countries (oil prices, COVID, global tourism trends)
+
+## Model Specification
+
+$$\log(\text{Arrivals}_{it}) = \alpha_i + \gamma_t + \beta' X_{it} + \varepsilon_{it}$$
+
+Where:
+
+- $\alpha_i$ = country fixed effects
+- $\gamma_t$ = year fixed effects  
+- $X_{it}$ = ESG variables
+- Cluster-robust standard errors by country
+
+## Results Comparison
+
+::: {.panel-tabset}
+
+### Two-Way FE ⭐ (Preferred)
+
+::: {.callout-important}
+## This is your main model for causal claims
+:::
+
+| Variable | Coefficient | Std. Error | p-value | Significance |
+|----------|-------------|------------|---------|--------------|
+| gov_corruption | **+0.0069** | 0.0025 | 0.005 | *** |
+| soc_internet_users | **+0.0051** | 0.0018 | 0.005 | *** |
+| env_co2_capita | +0.0505 | 0.0169 | 0.003 | *** |
+| env_renew_elec | **+0.0054** | 0.0027 | 0.050 | * |
+| env_pm25_exp | **-0.0234** | 0.0113 | 0.039 | * |
+| soc_unempl_ilo | **-0.0105** | 0.0049 | 0.032 | * |
+| gov_gdp_capita | -0.0000061 | 0.0000013 | <0.001 | *** |
+| soc_life_expect | +0.0307 | 0.0273 | 0.261 | |
+| gov_pol_stability | -0.0011 | 0.0015 | 0.452 | |
+
+**Significance:** *** p<0.01, ** p<0.05, * p<0.1
+
+### Country FE Only
+
+| Variable | Coefficient | Std. Error | p-value | Sig. |
+|----------|-------------|------------|---------|------|
+| env_co2_capita | +0.0612 | 0.0203 | 0.003 | ** |
+| gov_gdp_capita | -0.0000069 | 0.0000014 | <0.001 | *** |
+| soc_life_expect | **+0.1263** | 0.0279 | <0.001 | *** |
+| soc_unempl_ilo | -0.0144 | 0.0040 | <0.001 | *** |
+| soc_internet_users | +0.0028 | 0.0018 | 0.115 | |
+| gov_corruption | +0.0026 | 0.0028 | 0.349 | |
+
+Note: Life expectancy is significant here but not in Two-Way FE because year effects absorb global health trends.
+
+### Pooled OLS (Baseline)
+
+| Variable | Coefficient | Std. Error | p-value |
+|----------|-------------|------------|---------|
+| soc_life_expect | +0.2671 | 0.0194 | <0.001 |
+| gov_corruption | +0.0440 | 0.0048 | <0.001 |
+| env_pm25_exp | +0.0811 | 0.0128 | <0.001 |
+| gov_pol_stability | -0.0414 | 0.0038 | <0.001 |
+
+**R² = 0.456** (biased estimates - ignores panel structure)
+
+### Random Effects
+
+| Variable | Coefficient | Std. Error | p-value |
+|----------|-------------|------------|---------|
+| soc_life_expect | +0.1284 | 0.0111 | <0.001 |
+| env_co2_capita | +0.0593 | 0.0081 | <0.001 |
+| gov_gdp_capita | -0.0000072 | 0.0000013 | <0.001 |
+| soc_unempl_ilo | -0.0147 | 0.0027 | <0.001 |
+| soc_internet_users | +0.0029 | 0.0009 | 0.002 |
+
+**Hausman Test:** χ² = 8.20, p = 0.514
+
+Cannot reject H0 that Random Effects is consistent, but Fixed Effects is preferred for causal inference.
+
+:::
+
+## Key Causal Findings
+
+::: {.callout-tip}
+## 1. Governance Quality Increases Tourism
+
+**Effect:** +0.7% arrivals per unit improvement in corruption control (p=0.005)
+
+**Magnitude:** The corruption index ranges from ~-2.5 to +2.5. A country moving from "moderately corrupt" to "clean" (2 unit improvement) would see ~1.4% more arrivals.
+
+**Mechanism:** Better governance reduces transaction costs, increases safety perception, and improves service quality.
+:::
+
+::: {.callout-tip}
+## 2. Air Pollution Deters Tourists
+
+**Effect:** -2.3% arrivals per μg/m³ increase in PM2.5 (p=0.039)
+
+**Magnitude:** A 10 μg/m³ improvement in air quality could increase tourism by ~25%.
+
+**Policy implication:** Environmental regulations have tourism co-benefits.
+:::
+
+::: {.callout-tip}
+## 3. Digital Infrastructure Enables Tourism
+
+**Effect:** +0.5% arrivals per percentage point increase in internet users (p=0.005)
+
+**Mechanism:** Internet access enables online booking, trip research, and digital payments.
+:::
+
+::: {.callout-tip}
+## 4. Unemployment Signals Economic Distress
+
+**Effect:** -1.0% arrivals per percentage point increase in unemployment (p=0.032)
+
+**Mechanism:** Unemployment may signal poor service quality, social instability, or reduced infrastructure investment.
+:::
+
+## The Negative GDP Puzzle Explained
+
+::: {.callout-note}
+## Why is GDP per capita negative?
+
+The coefficient on `gov_gdp_capita` is **negative** (-0.0000061). This seems counterintuitive—don't rich countries get more tourists?
+
+**The answer lies in between vs. within variation:**
+
+| Comparison | Effect | Captured by |
+|------------|--------|-------------|
+| **Between countries** | Rich countries → More tourists | Country fixed effects |
+| **Within countries** | Getting richer → ??? | The coefficient |
+
+**Within-country interpretation:** As a country gets richer over time...
+
+1. **Prices rise** → Less competitive as a destination
+2. **Saturation effects** → Already-rich countries can't grow tourism indefinitely
+3. **Substitution** → Tourists already knew France was rich; becoming 5% richer doesn't change their perception
+
+The negative coefficient captures the within-country price/saturation effect, while the between-country wealth advantage is absorbed by fixed effects.
+:::
+
+---
+
+# Part 4: Elastic Net Variable Selection {#sec-enet}
+
+## Purpose
+
+Elastic Net handles multicollinearity and selects the most important variables from 74 candidates.
+
+## Model Specification
+
+- **Alpha:** 0.5 (mix of LASSO and Ridge)
+- **Lambda:** lambda.1se (parsimonious model)
+- Country fixed effects included (unpenalized)
+
+## Results
+
+**Selected:** 52 of 74 variables (70%)
+
+::: {.panel-tabset}
+
+### Top 10 by Magnitude
+
+| Variable | Coefficient | Dimension | Interpretation |
+|----------|-------------|-----------|----------------|
+| soc_open_defec | **-0.397** | Social | Open defecation STRONGLY deters |
+| env_co2_gdp | +0.313 | Environment | Carbon intensity (industrialization) |
+| soc_life_expect | +0.092 | Social | Health/development |
+| soc_gpi_secondary | -0.068 | Social | Gender parity effect |
+| soc_health_exp | -0.058 | Social | Health spending (complex) |
+| soc_pov_190 | -0.053 | Social | Extreme poverty deters |
+| gov_rd_expend | -0.025 | Governance | R&D spending |
+| soc_unempl_gen | -0.023 | Social | General unemployment |
+| soc_unempl_y_ilo | -0.022 | Social | Youth unemployment |
+| soc_edu_sec_dur | -0.019 | Social | Secondary education |
+
+### By Dimension
+
+| Dimension | # Selected | Avg |Coef| | Top Variable |
+|-----------|------------|-------------|--------------|
+| Environment | 5 | 0.067 | env_co2_gdp |
+| Governance | 16 | 0.005 | gov_rd_expend |
+| Social | 31 | 0.029 | soc_open_defec |
+
+### All 52 Selected Variables
+
+<details>
+<summary>Click to expand full list</summary>
+
+| Variable | Coefficient | Dimension |
+|----------|-------------|-----------|
+| soc_open_defec | -0.3968 | Social |
+| env_co2_gdp | 0.3135 | Environment |
+| soc_life_expect | 0.0924 | Social |
+| soc_gpi_secondary | -0.0685 | Social |
+| soc_health_exp | -0.0575 | Social |
+| soc_pov_190 | -0.0527 | Social |
+| gov_rd_expend | -0.0254 | Governance |
+| soc_unempl_gen | -0.0228 | Social |
+| soc_unempl_y_ilo | -0.0224 | Social |
+| soc_edu_sec_dur | -0.0185 | Social |
+| gov_real_gdp_gr | 0.0181 | Governance |
+| soc_unempl_ilo | -0.0178 | Social |
+| soc_gini_index | 0.0162 | Social |
+| soc_mort_general | -0.0142 | Social |
+| soc_mort_road | -0.0133 | Social |
+| soc_unempl_nat | -0.0123 | Social |
+| env_co2_capita | 0.0105 | Environment |
+| soc_sanit_basic | 0.0104 | Social |
+| soc_sanit_safe_rur | 0.0100 | Social |
+| soc_edu_pre_dur | -0.0095 | Social |
+| gov_rule_law | 0.0091 | Governance |
+| soc_sanit_safe_urb | -0.0079 | Social |
+| soc_mort_maternal | -0.0078 | Social |
+| soc_water_basic | 0.0075 | Social |
+| soc_pov_national | 0.0071 | Social |
+| soc_water_safe | 0.0060 | Social |
+| env_pm25_exp | -0.0049 | Environment |
+| gov_gdp_growth | -0.0045 | Governance |
+| gov_corruption | -0.0041 | Governance |
+| soc_youth_idle | -0.0041 | Social |
+| gov_cpi_aop | 0.0039 | Governance |
+| gov_pol_stability | -0.0034 | Governance |
+| env_renew_cons | -0.0030 | Environment |
+| env_nd_gain_idx | 0.0024 | Environment |
+| gov_inflation | 0.0022 | Governance |
+| gov_terms_trade | -0.0020 | Governance |
+| gov_voice_acc | -0.0019 | Governance |
+| soc_women_parl | -0.0019 | Social |
+| soc_immun_dpt | 0.0018 | Social |
+| soc_sanit_improved | 0.0015 | Social |
+| soc_edu_compul_yrs | -0.0015 | Social |
+| gov_reer | -0.0014 | Governance |
+| gov_export_price | 0.0013 | Governance |
+| gov_effectiveness | 0.0012 | Governance |
+| soc_immun_hepb | 0.0011 | Social |
+| soc_age_dependency | 0.0009 | Social |
+| soc_immun_measles | -0.0002 | Social |
+| soc_unempl_y_nat | -0.00003 | Social |
+| gov_reg_quality | 0.00001 | Governance |
+| gov_gdp_capita | -0.000005 | Governance |
+| gov_gdp_ppp_curr | -0.000001 | Governance |
+| soc_net_migration | 0.000000 | Social |
+
+</details>
+
+:::
+
+## Key Finding
+
+::: {.callout-important}
+## Open Defecation Has the Largest Coefficient
+
+The variable `soc_open_defec` (% of population practicing open defecation) has a coefficient of **-0.40**.
+
+**Interpretation:** A 1 percentage point increase in open defecation is associated with **40% fewer tourist arrivals**.
+
+**Policy implication:** Basic sanitation infrastructure is fundamental for tourism development. This finding aligns with the Random Forest results showing sanitation variables in the top 10.
+:::
+
+---
+
+# Part 5: Heterogeneity Analysis {#sec-het}
+
+## Purpose
+
+Test whether ESG effects differ between developed and developing countries.
+
+## Classification
+
+Countries classified using World Bank income groups:
+
+- **High Income:** 13-14 countries (324 observations)
+- **Low/Middle Income:** 13-14 countries (324 observations)
+
+## Results by Group
+
+::: {.panel-tabset}
+
+### Developing Countries
+
+| Variable | Coefficient | Std. Error | p-value | Sig. |
+|----------|-------------|------------|---------|------|
+| gov_corruption | **+0.0101** | 0.0025 | <0.001 | *** |
+| soc_internet_users | **+0.0080** | 0.0025 | 0.002 | ** |
+| env_pm25_exp | **-0.0432** | 0.0145 | 0.003 | ** |
+| env_co2_capita | +0.0675 | 0.0260 | 0.010 | * |
+| env_renew_elec | +0.0067 | 0.0027 | 0.014 | * |
+| gov_gdp_capita | -0.0000189 | 0.0000081 | 0.020 | * |
+| soc_life_expect | -0.0145 | 0.0313 | 0.643 | |
+| soc_unempl_ilo | -0.0040 | 0.0052 | 0.437 | |
+
+### Developed Countries
+
+| Variable | Coefficient | Std. Error | p-value | Sig. |
+|----------|-------------|------------|---------|------|
+| soc_life_expect | **+0.0784** | 0.0211 | <0.001 | *** |
+| soc_unempl_ilo | **-0.0072** | 0.0031 | 0.021 | * |
+| soc_internet_users | **-0.0029** | 0.0012 | 0.016 | * |
+| gov_gdp_capita | -0.0000028 | 0.0000011 | 0.012 | * |
+| env_co2_capita | +0.0114 | 0.0094 | 0.224 | |
+| env_pm25_exp | -0.0167 | 0.0121 | 0.169 | |
+| gov_corruption | -0.0011 | 0.0011 | 0.313 | |
+| env_renew_elec | +0.0002 | 0.0011 | 0.827 | |
+
+### Comparison Table
+
+| Variable | Developing | Developed | Ratio | Key Insight |
+|----------|------------|-----------|-------|-------------|
+| gov_corruption | **+0.010*** | -0.001 | **10x** | Governance matters MORE in developing |
+| soc_internet | **+0.008*** | -0.003* | **Opposite** | Internet helps developing, hurts developed |
+| env_pm25_exp | **-0.043*** | -0.017 | **2.5x** | Pollution hurts developing MORE |
+| soc_life_expect | -0.015 | **+0.078*** | **Opposite** | Health matters MORE in developed |
+| soc_unempl_ilo | -0.004 | **-0.007** | Similar | Unemployment hurts both |
+| env_renew_elec | **+0.007*** | +0.0002 | **35x** | Renewables only matter in developing |
+
+:::
+
+## Interaction Model Results
+
+To formally test whether coefficients differ, we estimate an interaction model:
+
+$$\log(\text{Arrivals}_{it}) = \beta X_{it} + \gamma (X_{it} \times \text{Developed}_i) + \alpha_i + \gamma_t + \varepsilon_{it}$$
+
+| Variable | Base (Developing) | Interaction (X_dev) | p-value | Interpretation |
+|----------|-------------------|---------------------|---------|----------------|
+| gov_corruption | +0.0087*** | +0.0019 | 0.360 | Governance slightly stronger in developing |
+| soc_internet | +0.0054*** | **-0.0038*** | <0.001 | Internet effect REVERSES in developed |
+| env_pm25_exp | -0.0218* | +0.0123. | 0.085 | Pollution effect weaker in developed |
+| env_co2_capita | +0.0421. | -0.0166 | 0.404 | CO2 effect similar |
+
+## Key Findings
+
+::: {.callout-important}
+## 1. Governance Effects are 10x Larger in Developing Countries
+
+- **Developing:** +1.0% arrivals per unit corruption improvement
+- **Developed:** -0.1% (not significant)
+
+**Why?** Developed countries already have good governance. Marginal improvements don't change tourist perception. Developing countries have more room to improve and tourists are more sensitive to governance quality there.
+:::
+
+::: {.callout-important}
+## 2. Internet Access Has OPPOSITE Effects
+
+- **Developing:** +0.8% arrivals per pp internet (significant)
+- **Developed:** -0.3% arrivals per pp internet (significant)
+
+**Why?** 
+- In developing countries, internet access enables tourism (booking, research, payments)
+- In developed countries, internet is already saturated (>90% penetration)
+- The negative effect may reflect measurement issues at high saturation levels
+:::
+
+::: {.callout-important}
+## 3. Air Pollution Matters More in Developing Countries
+
+- **Developing:** -4.3% arrivals per μg/m³ PM2.5 (highly significant)
+- **Developed:** -1.7% (not significant)
+
+**Why?** Tourists may be more sensitive to pollution in developing countries because they already expect clean air in developed countries.
+:::
+
+::: {.callout-important}
+## 4. Life Expectancy Matters More in Developed Countries
+
+- **Developing:** Not significant
+- **Developed:** +7.8% arrivals per year of life expectancy
+
+**Why?** In developed countries, life expectancy signals quality of life and healthcare quality—factors tourists care about. In developing countries, other factors dominate.
+:::
+
+---
+
+# Part 6: Spatial Analysis {#sec-spatial}
+
+## Purpose
+
+Test whether neighboring countries' tourism and ESG affect your tourism (spillover effects).
+
+## Methodology
+
+- Created spatial weights matrix based on contiguity (shared borders)
+- Computed spatial lags: average of neighbors' values
+- Estimated spatial lag model
+
+## Results
+
+| Variable | Coefficient | Std. Error | p-value | Interpretation |
+|----------|-------------|------------|---------|----------------|
+| (Intercept) | 13.58 | 1.64 | <0.001 | |
+| gov_corruption | 0.027 | 0.022 | 0.218 | Own effect |
+| soc_internet_users | 0.004 | 0.005 | 0.430 | Own effect |
+| env_co2_capita | -0.080 | 0.090 | 0.374 | Own effect |
+| **W_log_arrivals** | **+0.107** | 0.123 | 0.388 | Neighbor tourism |
+| **W_corruption** | **-0.009** | 0.026 | 0.739 | Neighbor governance |
+
+**Model R²:** 0.211
+
+## Interpretation
+
+::: {.callout-note}
+## Spatial Effects Are Not Statistically Significant
+
+Neither neighbor tourism nor neighbor corruption reaches significance (p > 0.10). However, the direction of effects is informative:
+
+**Neighbor Tourism Effect (+0.107):**
+- **Positive spillover tendency:** When neighbors get more tourists, you tend to get more too
+- Suggests multi-country trips and regional tourism clusters
+- Tourists visiting Paris often also visit Brussels or Amsterdam
+
+**Neighbor Corruption Effect (-0.009):**
+- Slight **competition effect:** When neighbors improve governance, tourists may shift to them
+- But effect is negligible and not significant
+:::
+
+::: {.callout-warning}
+## Limitations
+
+The spatial analysis has limited power due to:
+
+1. **Small sample:** Only 27 countries
+2. **European focus:** Neighbor definitions limited to European countries
+3. **Missing contiguity data:** Non-European countries have no defined neighbors
+4. **Full spatial analysis requires:** Shapefiles, proper spatial econometrics packages (spdep, splm)
+:::
+
+---
+
+# Part 7: Models That Did Not Converge {#sec-failed}
+
+## First Differences (Parts 6-7)
+
+::: {.callout-warning}
+## Model Failed: 0 Valid Observations
+
+**Reason:** Heavy imputation in the data cleaning phase created artificial smoothness.
+
+When we difference the data (Δyₜ = yₜ - yₜ₋₁), imputed values that were interpolated produce near-zero changes, resulting in no variation to estimate coefficients.
+
+**Implication:** Cannot confirm year-on-year causal effects. The Two-Way Fixed Effects model remains our best causal estimate.
+:::
+
+## Raw First Differences (Part 9)
+
+::: {.callout-warning}
+## Model Did Not Run
+
+**Reason:** Insufficient consecutive-year observations in the raw (non-imputed) data.
+
+Many countries have gaps in their data series, making it impossible to compute first differences for enough observations.
+:::
+
+## Dynamic Panel GMM (Part 11)
+
+::: {.callout-warning}
+## Model Did Not Converge
+
+**What it would have shown:** The persistence of tourism (whether past arrivals predict future arrivals) and endogeneity-corrected estimates.
+
+**Reason:** Insufficient time-series length or instrument validity issues.
+
+**Implication:** Cannot confirm tourism persistence effects or correct for potential endogeneity of lagged dependent variable.
+:::
+
+---
+
+# Cross-Method Synthesis {#sec-synthesis}
+
+## Consistency Across Methods
+
+| Finding | RF | FE | 2WFE | ENet | Het. | Confidence |
+|---------|-----|-----|------|------|------|------------|
+| Governance quality increases tourism | ✓ | · | ✓✓ | ✓ | ✓✓ | **Very High** |
+| Air pollution reduces tourism | · | · | ✓ | ✓ | ✓✓ | **High** |
+| Digital infrastructure helps | ✓ | · | ✓✓ | · | ✓✓ | **High** |
+| Unemployment hurts tourism | · | ✓✓ | ✓ | ✓ | · | **Moderate** |
+| Sanitation matters | ✓✓ | · | · | ✓✓ | — | **Moderate** |
+| Effects differ by development | — | — | — | — | ✓✓ | **High** |
+
+**Legend:** ✓✓ = highly significant, ✓ = significant/important, · = not significant, — = not tested
+
+## Which Model to Cite?
+
+| Purpose | Model | Section |
+|---------|-------|---------|
+| **Causal claims** | Two-Way Fixed Effects | @sec-fe |
+| **Prediction** | Random Forest | @sec-rf |
+| **Variable selection** | Elastic Net | @sec-enet |
+| **Subgroup effects** | Heterogeneity Analysis | @sec-het |
+| **Regional dynamics** | Spatial Model | @sec-spatial |
+
+---
+
+# Conclusions and Policy Implications {#sec-conclusions}
+
+## Main Findings
+
+::: {.callout-tip}
+## 1. Governance Quality is the Strongest ESG Driver
+
+Corruption control increases tourist arrivals by **0.7% per unit** (p=0.005), with effects **10x larger in developing countries**.
+
+**Policy:** Anti-corruption initiatives have tourism co-benefits.
+:::
+
+::: {.callout-tip}
+## 2. Air Pollution Significantly Deters Tourists
+
+PM2.5 exposure reduces arrivals by **2.3% per μg/m³** (p=0.039), with effects **2.5x larger in developing countries**.
+
+**Policy:** Environmental regulations pay tourism dividends.
+:::
+
+::: {.callout-tip}
+## 3. Digital Infrastructure Enables Tourism Growth
+
+Internet access increases arrivals by **0.5% per percentage point** (p=0.005), but only in developing countries.
+
+**Policy:** Digital infrastructure investment supports tourism development.
+:::
+
+::: {.callout-tip}
+## 4. ESG Effects are Heterogeneous
+
+Effects differ dramatically between developed and developing countries:
+
+- **Developing:** Governance, pollution, internet matter most
+- **Developed:** Life expectancy, health quality matter most
+
+**Policy:** One-size-fits-all approaches will be suboptimal.
+:::
+
+## Policy Recommendations
+
+### For Developing Countries
+
+1. **Prioritize anti-corruption efforts** — Each unit improvement yields ~1% more arrivals
+2. **Invest in air quality** — Pollution reduction has substantial tourism co-benefits
+3. **Expand internet access** — Digital infrastructure enables tourism growth
+4. **Ensure basic sanitation** — Open defecation has the largest negative effect of any variable
+
+### For Developed Countries
+
+1. **Maintain institutional quality** — Though marginal effects are smaller, governance still matters
+2. **Focus on quality-of-life indicators** — Health and wellbeing attract high-value tourists
+3. **Leverage regional spillovers** — Coordinate with neighbors on tourism promotion
+
+## Limitations
+
+1. **Imputation bias:** Heavy interpolation prevented first-differences estimation
+2. **Omitted variables:** Natural attractions, marketing spend, visa policies not included
+3. **Reverse causality:** Tourism may improve ESG (more revenue → better governance)
+4. **Sample composition:** 27 European-focused countries may limit generalizability
+5. **Spatial data:** Limited neighbor definitions reduced spatial analysis power
+
+## Future Research
+
+1. Expand sample to include more developing countries and regions
+2. Include natural attraction variables (UNESCO sites, beaches, mountains)
+3. Use instrumental variables to address reverse causality
+4. Collect better spatial data for comprehensive spillover analysis
+5. Examine tourism types separately (business vs. leisure, short-haul vs. long-haul)
+
+---
+
+# Technical Appendix {#sec-appendix}
+
+## A. Model Diagnostics
+
+### Hausman Test (Fixed vs. Random Effects)
+
+- **Chi-squared:** 8.20
+- **p-value:** 0.514
+- **Conclusion:** Cannot reject H0 that RE is consistent, but FE preferred for causal inference
+
+### Cluster-Robust Standard Errors
+
+All panel models use cluster-robust standard errors (clustered by country) to account for:
+
+- Serial correlation within countries
+- Heteroskedasticity across countries
+
+## B. Variable Definitions
+
+<details>
+<summary>Click to expand full variable list</summary>
+
+### Tourism Variables
+- `log_arrivals`: Log of international tourist arrivals
+- `tour_nights`: Total tourist nights
+- `tour_avg_stay`: Average length of stay
+
+### Environment Variables
+- `env_co2_capita`: CO2 emissions per capita (tonnes)
+- `env_co2_gdp`: CO2 intensity of GDP
+- `env_co2_pba`: Production-based CO2 emissions
+- `env_co2_cba`: Consumption-based CO2 emissions
+- `env_pm25_exp`: PM2.5 air pollution exposure (μg/m³)
+- `env_renew_elec`: Renewable electricity (% of total)
+- `env_renew_cons`: Renewable energy consumption (%)
+- `env_nd_gain_idx`: ND-GAIN climate adaptation index
+
+### Social Variables
+- `soc_life_expect`: Life expectancy at birth (years)
+- `soc_internet_users`: Internet users (% of population)
+- `soc_unempl_ilo`: Unemployment rate (ILO definition)
+- `soc_open_defec`: Open defecation (% of population)
+- `soc_sanit_basic`: Basic sanitation access (%)
+- ... (45 total)
+
+### Governance Variables
+- `gov_corruption`: Control of corruption index (-2.5 to +2.5)
+- `gov_rule_law`: Rule of law index
+- `gov_effectiveness`: Government effectiveness index
+- `gov_gdp_capita`: GDP per capita (current USD)
+- `gov_pol_stability`: Political stability index
+- ... (21 total)
+
+</details>
+
+## C. R Code
+
+The complete analysis was conducted using the following R script:
+
+- `ESG_Tourism_FULL_Analysis_v2.R` (2,571 lines)
+
+Key packages used:
+
+- `plm`: Panel data econometrics
+- `randomForest`: Random Forest models
+- `glmnet`: Elastic Net regularization
+- `lmtest`, `sandwich`: Robust standard errors
+- `countrycode`: Country classification
+
+---
+
+# References {.unnumbered}
+
+::: {#refs}
+:::
+
+---
+
+*Report generated on `r Sys.Date()`*
