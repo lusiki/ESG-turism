@@ -1,4 +1,15 @@
+
+
+
+
+![](esg.png)
+
+
+
+
 # ESG Factors and International Tourism
+
+
 
 A multi-method panel analysis examining how Environmental, Social, and Governance factors influence international tourist arrivals across 27 countries over 24 years (2000-2023).
 
@@ -64,4 +75,14 @@ Developing countries benefit most from governance and environmental improvements
 ```
 [LST] (2025). ESG Factors and International Tourism: 
 A Multi-Method Panel Analysis. Working Paper.
+
 ```
+
+## Full [results](https://raw.githack.com/lusiki/ESG-turism/main/present%20results.html)
+
+
+
+
+
+
+
