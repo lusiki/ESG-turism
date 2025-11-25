@@ -2,7 +2,7 @@
 
 
 
-![](esg.png)
+![](esg.jpg)
 
 
 
