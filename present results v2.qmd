@@ -1,7 +1,7 @@
 ---
 title: "ESG Factors and International Tourism"
 subtitle: "A Multi-Method Panel Analysis of 27 Countries (2000-2023)"
-author: "Lux"
+author: "[Your Name]"
 date: today
 format:
   html:
