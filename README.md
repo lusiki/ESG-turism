@@ -80,7 +80,7 @@ A Multi-Method Panel Analysis. Working Paper.
 
 ## Comprehensive empirical report is avaliable [here](https://raw.githack.com/lusiki/ESG-turism/main/present%20results_.html)
 ## Comprehensive empirical report2 is avaliable [here](https://raw.githack.com/lusiki/ESG-turism/main/present%20results%20v2.html)
-## Comprehensive empirical report2 is avaliable [here](https://raw.githack.com/lusiki/ESG-turism/main/new%20presentation.html)
+## Comprehensive empirical report3 is avaliable [here](https://raw.githack.com/lusiki/ESG-turism/main/new%20presentation.html)
 
 
 
