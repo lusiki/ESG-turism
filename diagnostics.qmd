@@ -1,0 +1,614 @@
+---
+title: "ESG Tourism — Reviewer Diagnostics"
+subtitle: "Within R², SEs, sample, COVID robustness, v2-vs-v3"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    toc-location: left
+    number-sections: true
+    theme: cosmo
+    code-fold: true
+    code-summary: "Show code"
+    self-contained: true
+    fig-width: 10
+    fig-height: 6
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+# Setup
+
+```{r setup}
+#| code-fold: true
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(tidyr)
+  library(plm)
+  library(lmtest)
+  library(sandwich)
+  library(knitr)
+  library(kableExtra)
+})
+
+options(scipen = 999)
+
+dta_clean <- readRDS("dta_clean.rds")
+
+# Recompute developed/dev_group exactly as in v3 (median of country-mean GDP)
+country_gdp <- dta_clean %>%
+  group_by(Country) %>%
+  summarise(avg_gdp = mean(gov_gdp_capita, na.rm = TRUE), .groups = "drop")
+
+median_gdp <- median(country_gdp$avg_gdp, na.rm = TRUE)
+country_gdp <- country_gdp %>%
+  mutate(developed = as.integer(avg_gdp > median_gdp),
+         dev_group = ifelse(developed == 1, "High Income", "Low/Middle Income"))
+
+dta_clean <- dta_clean %>%
+  left_join(country_gdp %>% select(Country, developed, dev_group), by = "Country")
+
+pdata <- pdata.frame(dta_clean, index = c("Country", "Year"), drop.index = FALSE)
+
+# Spec definitions
+v3_ivs <- c(
+  "gov_corruption", "gov_gdp_capita", "gov_effectiveness", "gov_pol_stability", "gov_rule_law",
+  "soc_internet_users", "soc_life_expect", "soc_unempl_ilo", "soc_broadband", "soc_health_exp", "soc_mort_infant",
+  "env_pm25_exp", "env_co2_capita", "env_renew_elec", "env_nd_gain_idx"
+)
+v3_ivs <- v3_ivs[v3_ivs %in% names(pdata)]
+
+v2_ivs <- c(
+  "gov_corruption", "soc_internet_users", "env_co2_capita",
+  "env_renew_elec", "env_pm25_exp", "soc_unempl_ilo",
+  "gov_gdp_capita", "soc_life_expect"
+)
+v2_ivs <- v2_ivs[v2_ivs %in% names(pdata)]
+
+dvs <- c("log_arrivals", "log_nights", "log_night_pop", "log_night_area")
+dvs <- dvs[dvs %in% names(pdata)]
+
+key4 <- c("gov_corruption", "env_pm25_exp", "soc_internet_users", "soc_unempl_ilo")
+```
+
+```{r helpers}
+#| code-fold: true
+
+# Two-way FE with HC1 cluster-by-country SE; returns coeftest, fitted plm, within R²
+fit_twfe <- function(dv, ivs, data) {
+  f <- as.formula(paste(dv, "~", paste(ivs, collapse = " + ")))
+  fe2 <- plm(f, data = data, model = "within", effect = "twoways",
+             index = c("Country", "Year"))
+  ct  <- coeftest(fe2, vcov = vcovHC(fe2, type = "HC1", cluster = "group"))
+  list(model = fe2,
+       ct = ct,
+       r2 = unname(summary(fe2)$r.squared["rsq"]),
+       adj_r2 = unname(summary(fe2)$r.squared["adjrsq"]),
+       n = nobs(fe2),
+       n_countries = length(unique(index(fe2)[[1]])))
+}
+
+# Coefficient table with SE, t, p, sig stars, 95% CI
+coef_kable <- function(fit, caption, dv = NULL) {
+  m  <- as.matrix(fit$ct)
+  df <- data.frame(
+    Variable = rownames(m),
+    Coefficient = round(m[, 1], 4),
+    SE = round(m[, 2], 4),
+    t = round(m[, 3], 2),
+    p = round(m[, 4], 3),
+    CI_low  = round(m[, 1] - 1.96 * m[, 2], 4),
+    CI_high = round(m[, 1] + 1.96 * m[, 2], 4),
+    row.names = NULL
+  )
+  df$Sig <- with(df, ifelse(p < 0.01, "***", ifelse(p < 0.05, "**", ifelse(p < 0.10, "*", ""))))
+  df <- df[, c("Variable", "Coefficient", "SE", "t", "p", "Sig", "CI_low", "CI_high")]
+
+  footer <- sprintf("n = %d | countries = %d | within R² = %.3f | adj. within R² = %.3f",
+                    fit$n, fit$n_countries, fit$r2, fit$adj_r2)
+  cap <- if (is.null(dv)) caption else paste0(caption, " — DV: ", dv)
+  kable(df, caption = paste0(cap, "  •  ", footer)) %>%
+    kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+}
+```
+
+# Headline coefficient tables — full sample, v3 spec
+
+These are the v3 two-way FE results with cluster-robust HC1 SEs, **with within R² printed under every table**. Apply the user's rule of thumb to the within R²: <0.05 → noise; 0.05–0.15 → ambiguous; >0.15 → real.
+
+```{r headline-full}
+#| code-fold: true
+#| results: asis
+
+for (dv in dvs) {
+  fit <- fit_twfe(dv, v3_ivs, pdata)
+  print(coef_kable(fit, "Two-way FE (full sample, v3 spec)", dv))
+  cat("\n\n")
+}
+```
+
+# Country list with GDP-per-capita classification
+
+The v3 paper splits countries at the **median of country-mean `gov_gdp_capita` across 2000–2023** — *not* a World Bank or IMF classification. The threshold and the actual country bins are below; the user can confirm whether the "developing" label is defensible.
+
+```{r country-classification}
+#| code-fold: true
+
+country_summary <- dta_clean %>%
+  group_by(Country) %>%
+  summarise(
+    avg_gdp_pc = round(mean(gov_gdp_capita, na.rm = TRUE), 0),
+    min_year = min(Year, na.rm = TRUE),
+    max_year = max(Year, na.rm = TRUE),
+    n_years = n(),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    threshold = round(median_gdp, 0),
+    distance_from_median = round(avg_gdp_pc - median_gdp, 0),
+    group = ifelse(avg_gdp_pc > median_gdp, "High Income", "Low/Middle Income")
+  ) %>%
+  arrange(desc(avg_gdp_pc)) %>%
+  select(Country, avg_gdp_pc, threshold, distance_from_median, group, min_year, max_year, n_years)
+
+kable(country_summary,
+      col.names = c("Country", "Avg GDP/cap", "Median threshold",
+                    "Δ from median", "Group", "Start", "End", "N years"),
+      caption = sprintf("Country classification (median = %s). 13 countries above, 14 below — or vice-versa, depending on ties.",
+                        format(round(median_gdp, 0), big.mark = ","))) %>%
+  kable_styling(bootstrap_options = c("striped", "hover")) %>%
+  row_spec(which(country_summary$group == "Low/Middle Income"), background = "#fff5f5")
+```
+
+# Within-country variation in the four key regressors
+
+If a country has only a handful of distinct values for `gov_corruption` across 24 years, the within-country FE estimator has very little variation to identify the coefficient. This section shows how much actual variation drives the FE estimates.
+
+## Per-variable summary across the 27 countries
+
+```{r within-summary}
+#| code-fold: true
+
+within_stats <- dta_clean %>%
+  select(Country, all_of(key4)) %>%
+  pivot_longer(-Country, names_to = "variable", values_to = "value") %>%
+  group_by(variable, Country) %>%
+  summarise(
+    n_distinct = n_distinct(round(value, 6)),
+    sd_within = sd(value, na.rm = TRUE),
+    range_within = max(value, na.rm = TRUE) - min(value, na.rm = TRUE),
+    n_obs = sum(!is.na(value)),
+    .groups = "drop"
+  )
+
+within_summary <- within_stats %>%
+  group_by(variable) %>%
+  summarise(
+    `min n_distinct` = min(n_distinct),
+    `median n_distinct` = median(n_distinct),
+    `max n_distinct` = max(n_distinct),
+    `min within SD` = round(min(sd_within, na.rm = TRUE), 3),
+    `median within SD` = round(median(sd_within, na.rm = TRUE), 3),
+    `max within SD` = round(max(sd_within, na.rm = TRUE), 3),
+    .groups = "drop"
+  )
+
+kable(within_summary,
+      caption = "Within-country variation in key regressors (across 27 countries, 2000–2023)") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+## Per-country detail — distinct values
+
+```{r within-per-country}
+#| code-fold: true
+
+per_country_distinct <- within_stats %>%
+  select(Country, variable, n_distinct) %>%
+  pivot_wider(names_from = variable, values_from = n_distinct) %>%
+  arrange(Country)
+
+kable(per_country_distinct,
+      caption = "Number of distinct within-country values, 2000–2023") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+## Per-country detail — within-country SD
+
+```{r within-per-country-sd}
+#| code-fold: true
+
+per_country_sd <- within_stats %>%
+  mutate(sd_within = round(sd_within, 3)) %>%
+  select(Country, variable, sd_within) %>%
+  pivot_wider(names_from = variable, values_from = sd_within) %>%
+  arrange(Country)
+
+kable(per_country_sd,
+      caption = "Within-country standard deviation, 2000–2023") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+# Headline FE — with vs without 2020–2022 (COVID)
+
+If excluding 2020–2022 materially moves a coefficient, the COVID period was doing the heavy lifting. Threshold to flag: |Δ| > 50% of full-sample β, or a sign flip, or a significance class change.
+
+```{r covid-comparison}
+#| code-fold: true
+#| results: asis
+
+pdata_no_covid <- pdata.frame(
+  dta_clean %>% filter(!Year %in% 2020:2022),
+  index = c("Country", "Year"), drop.index = FALSE
+)
+
+build_compare <- function(dv) {
+  full <- fit_twfe(dv, v3_ivs, pdata)
+  noco <- fit_twfe(dv, v3_ivs, pdata_no_covid)
+
+  m_full <- as.matrix(full$ct)
+  m_noco <- as.matrix(noco$ct)
+
+  vars <- union(rownames(m_full), rownames(m_noco))
+  cmp <- data.frame(
+    Variable = vars,
+    `Full β`        = round(m_full[vars, 1], 4),
+    `Full SE`       = round(m_full[vars, 2], 4),
+    `Full p`        = round(m_full[vars, 4], 3),
+    `No-COVID β`    = round(m_noco[vars, 1], 4),
+    `No-COVID SE`   = round(m_noco[vars, 2], 4),
+    `No-COVID p`    = round(m_noco[vars, 4], 3),
+    check.names = FALSE,
+    row.names = NULL
+  )
+  cmp$`Δ (No-COVID − Full)` <- round(cmp$`No-COVID β` - cmp$`Full β`, 4)
+  cmp$`|Δ| / |Full β|` <- ifelse(abs(cmp$`Full β`) > 0,
+                                  round(abs(cmp$`Δ (No-COVID − Full)`) / abs(cmp$`Full β`), 2),
+                                  NA)
+
+  footer <- sprintf("Full: n=%d, within R²=%.3f  |  No-COVID: n=%d, within R²=%.3f",
+                    full$n, full$r2, noco$n, noco$r2)
+  list(table = cmp, footer = footer)
+}
+
+for (dv in dvs) {
+  out <- build_compare(dv)
+  print(
+    kable(out$table,
+          caption = paste0("Full sample vs 2020–2022 dropped — DV: ", dv, "  •  ", out$footer)) %>%
+      kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+  )
+  cat("\n\n")
+}
+```
+
+# v2 vs v3 main estimates — same data, same FE, different regressor set
+
+The two versions of the paper use the same panel, same DV, same two-way FE, and same cluster-robust SEs — but the regressor set differs. Below, **both specs are estimated on the same `pdata`**, so any difference in `gov_corruption` etc. is *purely* attributable to omitted-variable / multicollinearity reshuffling between specifications. This is the "moving target" check.
+
+- **v2 spec (8 IVs)**: `r paste(v2_ivs, collapse = ", ")`
+- **v3 spec (15 IVs)**: `r paste(v3_ivs, collapse = ", ")`
+
+```{r v2-vs-v3}
+#| code-fold: true
+
+fit_v2 <- fit_twfe("log_arrivals", v2_ivs, pdata)
+fit_v3 <- fit_twfe("log_arrivals", v3_ivs, pdata)
+
+m_v2 <- as.matrix(fit_v2$ct)
+m_v3 <- as.matrix(fit_v3$ct)
+
+all_vars <- union(rownames(m_v2), rownames(m_v3))
+
+fmt <- function(M, v) {
+  if (!v %in% rownames(M)) return(c(NA_real_, NA_real_, NA_real_))
+  c(round(M[v, 1], 4), round(M[v, 2], 4), round(M[v, 4], 3))
+}
+
+cmp <- do.call(rbind, lapply(all_vars, function(v) {
+  a <- fmt(m_v2, v); b <- fmt(m_v3, v)
+  data.frame(
+    Variable = v,
+    `v2 β` = a[1], `v2 SE` = a[2], `v2 p` = a[3],
+    `v3 β` = b[1], `v3 SE` = b[2], `v3 p` = b[3],
+    `In v2` = v %in% rownames(m_v2),
+    `In v3` = v %in% rownames(m_v3),
+    check.names = FALSE,
+    stringsAsFactors = FALSE
+  )
+}))
+
+cmp$Status <- with(cmp,
+  ifelse(`In v2` & `In v3`, "Both",
+  ifelse(`In v2`, "v2 only", "v3 only")))
+
+# sign flip / significance class flag
+sig_class <- function(p) ifelse(is.na(p), "na",
+                                ifelse(p < 0.01, "***",
+                                ifelse(p < 0.05, "**",
+                                ifelse(p < 0.10, "*", "ns"))))
+cmp$Flag <- with(cmp, ifelse(
+  Status == "Both" & !is.na(`v2 β`) & !is.na(`v3 β`) &
+    sign(`v2 β`) != sign(`v3 β`), "SIGN FLIP",
+  ifelse(Status == "Both" & sig_class(`v2 p`) != sig_class(`v3 p`), "sig-class change", "")))
+
+cmp <- cmp %>%
+  mutate(`In v2` = ifelse(`In v2`, "yes", "no"),
+         `In v3` = ifelse(`In v3`, "yes", "no")) %>%
+  arrange(desc(Status == "Both"), Variable)
+
+footer <- sprintf("v2: n=%d, within R²=%.3f, p=%d regressors  |  v3: n=%d, within R²=%.3f, p=%d regressors",
+                  fit_v2$n, fit_v2$r2, length(v2_ivs),
+                  fit_v3$n, fit_v3$r2, length(v3_ivs))
+
+kable(cmp, caption = paste0("v2 vs v3 — DV: log_arrivals, two-way FE, HC1 cluster-by-country  •  ", footer)) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+# Heterogeneity — within R² for developed and developing samples
+
+```{r heterogeneity-r2}
+#| code-fold: true
+
+pdata_dev_sub  <- pdata[pdata$developed == 1, ]
+pdata_devg_sub <- pdata[pdata$developed == 0, ]
+
+fit_dev_full  <- fit_twfe("log_arrivals", v3_ivs, pdata_dev_sub)
+fit_devg_full <- fit_twfe("log_arrivals", v3_ivs, pdata_devg_sub)
+
+# Bivariate refit on gov_corruption alone, by subsample
+fit_dev_corr  <- fit_twfe("log_arrivals", "gov_corruption", pdata_dev_sub)
+fit_devg_corr <- fit_twfe("log_arrivals", "gov_corruption", pdata_devg_sub)
+
+corr_row <- function(fit) {
+  m <- as.matrix(fit$ct)
+  if (!"gov_corruption" %in% rownames(m)) return("—")
+  sprintf("%.4f (%.4f)%s",
+          m["gov_corruption", 1], m["gov_corruption", 2],
+          ifelse(m["gov_corruption", 4] < 0.01, "***",
+          ifelse(m["gov_corruption", 4] < 0.05, "**",
+          ifelse(m["gov_corruption", 4] < 0.10, "*", ""))))
+}
+
+het_tab <- data.frame(
+  Sample = c("High Income (developed)", "Low/Middle Income (developing)"),
+  n = c(fit_dev_full$n, fit_devg_full$n),
+  `n countries` = c(fit_dev_full$n_countries, fit_devg_full$n_countries),
+  `Within R² (full v3 spec)` = round(c(fit_dev_full$r2, fit_devg_full$r2), 3),
+  `Within R² (corruption only)` = round(c(fit_dev_corr$r2, fit_devg_corr$r2), 3),
+  `gov_corruption β (SE) — full spec` = c(corr_row(fit_dev_full),  corr_row(fit_devg_full)),
+  `gov_corruption β (SE) — bivariate` = c(corr_row(fit_dev_corr),  corr_row(fit_devg_corr)),
+  check.names = FALSE
+)
+
+kable(het_tab,
+      caption = "Heterogeneity — full-spec within R² and corruption-only within R² by subsample (DV: log_arrivals, two-way FE, HC1 cluster-by-country)") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+# Governance-pillar collinearity — what killed `gov_corruption`
+
+The five governance variables in v3 are conceptually overlapping (Worldwide Governance Indicators are by construction correlated). This section quantifies it: pairwise correlations on the within-country-demeaned governance variables (the variation actually used by the FE estimator), and VIFs from a within-transformed regression.
+
+```{r gov-collinearity}
+#| code-fold: true
+
+gov_pillar <- c("gov_corruption", "gov_effectiveness", "gov_pol_stability",
+                "gov_rule_law", "gov_gdp_capita")
+
+# Within-country demeaned values (the variation FE uses)
+demean_within <- function(df, vars) {
+  df %>%
+    group_by(Country) %>%
+    mutate(across(all_of(vars), ~ .x - mean(.x, na.rm = TRUE), .names = "{.col}__w")) %>%
+    ungroup() %>%
+    select(ends_with("__w"))
+}
+
+gov_w <- demean_within(dta_clean, gov_pillar)
+names(gov_w) <- sub("__w$", "", names(gov_w))
+
+cor_mat <- round(cor(gov_w, use = "pairwise.complete.obs"), 3)
+
+kable(cor_mat,
+      caption = "Within-country (FE-relevant) correlation matrix — governance pillar") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+```{r gov-vif}
+#| code-fold: true
+
+# VIF from within-transformed OLS: regress each gov var on the other gov vars
+# using within-demeaned values, so VIFs reflect what the FE estimator sees.
+vif_table <- data.frame(
+  Variable = gov_pillar,
+  VIF = NA_real_,
+  `R² of aux. regression` = NA_real_,
+  check.names = FALSE
+)
+for (i in seq_along(gov_pillar)) {
+  v <- gov_pillar[i]
+  others <- setdiff(gov_pillar, v)
+  d <- gov_w
+  d <- d[complete.cases(d), ]
+  aux <- lm(as.formula(paste0(v, " ~ ", paste(others, collapse = " + "))), data = d)
+  r2 <- summary(aux)$r.squared
+  vif_table$`R² of aux. regression`[i] <- round(r2, 3)
+  vif_table$VIF[i] <- round(1 / (1 - r2), 2)
+}
+
+kable(vif_table,
+      caption = "VIF on within-country-demeaned governance variables (rule of thumb: VIF > 5 problematic, > 10 severe)") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+```{r gov-leave-one-in}
+#| code-fold: true
+
+# Sequential refit: corruption alone, then add gov vars one at a time.
+# Shows how each governance variable sucks out corruption's coefficient.
+add_order <- c("gov_corruption", "gov_gdp_capita", "gov_rule_law",
+               "gov_effectiveness", "gov_pol_stability")
+
+seq_rows <- list()
+for (k in seq_along(add_order)) {
+  ivs_k <- add_order[1:k]
+  fit_k <- fit_twfe("log_arrivals", ivs_k, pdata)
+  m <- as.matrix(fit_k$ct)
+  if ("gov_corruption" %in% rownames(m)) {
+    seq_rows[[k]] <- data.frame(
+      `Step` = k,
+      `Spec` = paste(ivs_k, collapse = " + "),
+      `corruption β` = round(m["gov_corruption", 1], 4),
+      `corruption SE` = round(m["gov_corruption", 2], 4),
+      `corruption p` = round(m["gov_corruption", 4], 3),
+      `Within R²` = round(fit_k$r2, 3),
+      check.names = FALSE,
+      stringsAsFactors = FALSE
+    )
+  }
+}
+seq_tab <- do.call(rbind, seq_rows)
+
+kable(seq_tab,
+      caption = "Sequential governance build-up: how each added control changes the corruption coefficient") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+# Heterogeneity — PM2.5 and internet, by income bin, COVID excluded
+
+Re-estimates the **full v3 multivariate spec** on the developed and developing subsamples with 2020–2022 dropped, and reports the two coefficients the headline narrative depends on: `env_pm25_exp` and `soc_internet_users`. If both are noise in at least one bin, the heterogeneity story for PM2.5 / internet does not survive.
+
+```{r het-pm25-internet}
+#| code-fold: true
+
+pdata_dev_noco  <- pdata.frame(
+  dta_clean %>% filter(developed == 1, !Year %in% 2020:2022),
+  index = c("Country", "Year"), drop.index = FALSE
+)
+pdata_devg_noco <- pdata.frame(
+  dta_clean %>% filter(developed == 0, !Year %in% 2020:2022),
+  index = c("Country", "Year"), drop.index = FALSE
+)
+
+fit_dev_noco  <- fit_twfe("log_arrivals", v3_ivs, pdata_dev_noco)
+fit_devg_noco <- fit_twfe("log_arrivals", v3_ivs, pdata_devg_noco)
+
+extract_var_row <- function(fit, varname) {
+  m <- as.matrix(fit$ct)
+  if (!varname %in% rownames(m)) return(rep(NA_real_, 4))
+  c(m[varname, 1], m[varname, 2], m[varname, 3], m[varname, 4])
+}
+
+mk_row <- function(label, fit, varname) {
+  v <- extract_var_row(fit, varname)
+  sig <- if (is.na(v[4])) "" else if (v[4] < 0.01) "***" else if (v[4] < 0.05) "**" else if (v[4] < 0.10) "*" else ""
+  data.frame(
+    Sample = label,
+    Variable = varname,
+    β = round(v[1], 4),
+    SE = round(v[2], 4),
+    t = round(v[3], 2),
+    p = round(v[4], 3),
+    Sig = sig,
+    `CI low` = round(v[1] - 1.96 * v[2], 4),
+    `CI high` = round(v[1] + 1.96 * v[2], 4),
+    n = fit$n,
+    `Within R²` = round(fit$r2, 3),
+    check.names = FALSE,
+    stringsAsFactors = FALSE
+  )
+}
+
+het_no_covid <- rbind(
+  mk_row("High Income, no COVID",   fit_dev_noco,  "env_pm25_exp"),
+  mk_row("Low/Middle, no COVID",    fit_devg_noco, "env_pm25_exp"),
+  mk_row("High Income, no COVID",   fit_dev_noco,  "soc_internet_users"),
+  mk_row("Low/Middle, no COVID",    fit_devg_noco, "soc_internet_users")
+)
+
+kable(het_no_covid,
+      caption = "PM2.5 and internet — full v3 spec, by income bin, 2020–2022 excluded (DV: log_arrivals, two-way FE, HC1 cluster-by-country)") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+# Theory-driven sparse spec
+
+A 5-regressor specification chosen on substantive grounds rather than statistical selection. Selection criteria:
+
+- **`gov_corruption`** — the headline governance signal the paper wants to make. Replaces the WGI cluster (which is multi-collinear) with the single best-known indicator.
+- **`env_pm25_exp`** — direct, interpretable environmental amenity (visible air quality). Substantive prior for tourism.
+- **`soc_internet_users`** — booking, search, planning channel. Direct mechanism for tourism flows.
+- **`soc_unempl_ilo`** — domestic-economy proxy; controls for cyclical labour-market conditions tourists are sensitive to.
+- **`gov_gdp_capita`** — income / cost-of-destination control; without it, PM2.5 and internet pick up trends in development.
+
+Five regressors at 27 countries × 24 years gives a comfortable d.f. budget and avoids the WGI collinearity problem.
+
+```{r theory-sparse}
+#| code-fold: true
+
+theory_ivs <- c("gov_corruption", "env_pm25_exp", "soc_internet_users",
+                "soc_unempl_ilo", "gov_gdp_capita")
+
+fit_theory_full   <- fit_twfe("log_arrivals", theory_ivs, pdata)
+fit_theory_noco   <- fit_twfe("log_arrivals", theory_ivs, pdata.frame(
+  dta_clean %>% filter(!Year %in% 2020:2022),
+  index = c("Country", "Year"), drop.index = FALSE))
+fit_theory_dev    <- fit_twfe("log_arrivals", theory_ivs, pdata_dev_sub)
+fit_theory_devg   <- fit_twfe("log_arrivals", theory_ivs, pdata_devg_sub)
+
+print(coef_kable(fit_theory_full, "Theory-driven sparse spec, full sample", "log_arrivals"))
+print(coef_kable(fit_theory_noco, "Theory-driven sparse spec, COVID excluded", "log_arrivals"))
+```
+
+## Theory-sparse vs v3 — side-by-side on the four headline regressors
+
+```{r theory-vs-v3}
+#| code-fold: true
+
+four <- c("gov_corruption", "env_pm25_exp", "soc_internet_users", "soc_unempl_ilo")
+
+side_row <- function(varname) {
+  get_one <- function(fit) {
+    m <- as.matrix(fit$ct)
+    if (!varname %in% rownames(m)) return(rep(NA_real_, 3))
+    c(m[varname, 1], m[varname, 2], m[varname, 4])
+  }
+  v3_full   <- get_one(fit_v3)
+  th_full   <- get_one(fit_theory_full)
+  th_noco   <- get_one(fit_theory_noco)
+  th_dev    <- get_one(fit_theory_dev)
+  th_devg   <- get_one(fit_theory_devg)
+
+  data.frame(
+    Variable = varname,
+    `v3 β (SE, p)`        = sprintf("%.4f (%.4f, %.3f)", v3_full[1],  v3_full[2],  v3_full[3]),
+    `Theory β (SE, p)`    = sprintf("%.4f (%.4f, %.3f)", th_full[1],  th_full[2],  th_full[3]),
+    `Theory no-COVID`     = sprintf("%.4f (%.4f, %.3f)", th_noco[1],  th_noco[2],  th_noco[3]),
+    `Theory High-Income`  = sprintf("%.4f (%.4f, %.3f)", th_dev[1],   th_dev[2],   th_dev[3]),
+    `Theory Low/Middle`   = sprintf("%.4f (%.4f, %.3f)", th_devg[1],  th_devg[2],  th_devg[3]),
+    check.names = FALSE,
+    stringsAsFactors = FALSE
+  )
+}
+
+side_tab <- do.call(rbind, lapply(four, side_row))
+
+footer <- sprintf("v3 full: n=%d, R²=%.3f  |  Theory full: n=%d, R²=%.3f  |  Theory no-COVID: n=%d, R²=%.3f  |  Theory High: n=%d, R²=%.3f  |  Theory Low: n=%d, R²=%.3f",
+                  fit_v3$n, fit_v3$r2,
+                  fit_theory_full$n, fit_theory_full$r2,
+                  fit_theory_noco$n, fit_theory_noco$r2,
+                  fit_theory_dev$n,  fit_theory_dev$r2,
+                  fit_theory_devg$n, fit_theory_devg$r2)
+
+kable(side_tab,
+      caption = paste0("Theory-driven 5-regressor spec vs v3 — DV: log_arrivals, two-way FE, HC1 cluster-by-country  •  ", footer)) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+# Quick-read summary
+
+§7 shows what killed `gov_corruption` — the WGI governance variables are mechanically collinear, so the corruption coefficient is being absorbed by `gov_rule_law` / `gov_effectiveness` rather than genuinely zero. §8 decides whether the PM2.5 / internet heterogeneity story survives once both COVID and the multivariate-FE-noise are controlled. §9 gives a defensible final spec: if the theory-sparse coefficients on PM2.5 and internet are close to v3's, that is the spec to put in the main paper, with v3 demoted to an appendix robustness panel.
